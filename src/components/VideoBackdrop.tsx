@@ -12,10 +12,11 @@ export const VideoBackdrop = ({
   isPlaying = false
 }: VideoBackdropProps) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [videoLoaded, setVideoLoaded] = useState(false);
+  const [videoReady, setVideoReady] = useState(false);
   const [isMorphing, setIsMorphing] = useState(false);
   const prevStageRef = useRef(activeStage);
   const isSeekingRef = useRef(false);
+  const seekTimeoutRef = useRef<number | null>(null);
 
   // Soft optical stage morphing (Zero Grain / No Dithering)
   useEffect(() => {
@@ -27,55 +28,149 @@ export const VideoBackdrop = ({
     }
   }, [activeStage]);
 
-  // Native Playback Sync for Low-End Devices (Hardware Accelerated VPU)
+  // Mobile WebKit & Android Lifecycle Initialization
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !videoLoaded) return;
+    if (!video) return;
+
+    // React JSX doesn't reliably set DOM muted property on WebKit/iOS
+    video.muted = true;
+    video.defaultMuted = true;
+    video.playsInline = true;
+    video.setAttribute('muted', '');
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', 'true');
+    video.setAttribute('x5-playsinline', 'true');
+    video.setAttribute('x5-video-player-type', 'h5');
+
+    // If metadata already in cache
+    if (video.readyState >= 1) {
+      setVideoReady(true);
+    }
+
+    // Attempt initial autoplay to prime mobile hardware VPU decoder
+    const playPromise = video.play();
+    if (playPromise !== undefined) {
+      playPromise
+        .then(() => {
+          setVideoReady(true);
+          if (!isPlaying) {
+            video.pause();
+          }
+        })
+        .catch(() => {
+          // Autoplay policy on mobile low power mode; primed on user gesture below
+        });
+    }
+
+    // Universal gesture unlock (iOS Low Power Mode blocks initial autoplay until touch/scroll)
+    const unlockDecoder = () => {
+      if (video) {
+        video.muted = true;
+        video.play().then(() => {
+          setVideoReady(true);
+          if (!isPlaying) {
+            video.pause();
+          }
+        }).catch(() => {});
+      }
+    };
+
+    window.addEventListener('touchstart', unlockDecoder, { passive: true, once: true });
+    window.addEventListener('pointerdown', unlockDecoder, { passive: true, once: true });
+    window.addEventListener('scroll', unlockDecoder, { passive: true, once: true });
+
+    return () => {
+      window.removeEventListener('touchstart', unlockDecoder);
+      window.removeEventListener('pointerdown', unlockDecoder);
+      window.removeEventListener('scroll', unlockDecoder);
+      if (seekTimeoutRef.current) {
+        clearTimeout(seekTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Continuous Tour Auto-Playback Sync
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
 
     if (isPlaying) {
       if (video.paused) {
-        video.play().catch(() => {
-          // Autoplay policy fallback
-        });
+        video.play().catch(() => {});
       }
     } else {
       if (!video.paused) {
         video.pause();
       }
     }
-  }, [isPlaying, videoLoaded]);
+  }, [isPlaying]);
 
-  // Throttled RAF Seek when user manually scrolls (Prevents decoder thrashing on phones/tablets)
+  // Hardware-Safe Scroll Scrubbing with Safety Timeout & Rapid Recovery
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !videoLoaded || isPlaying) return;
+    if (!video || isPlaying) return;
 
     const maxDuration = video.duration || 54.96;
     const targetTime = Math.min(maxDuration - 0.05, Math.max(0, currentTime));
 
-    if (Math.abs(video.currentTime - targetTime) > 0.08 && !isSeekingRef.current) {
+    if (Math.abs(video.currentTime - targetTime) > 0.06 && !isSeekingRef.current) {
       isSeekingRef.current = true;
-      video.currentTime = targetTime;
+
+      // Use fastSeek if available (Supported in Safari/Firefox for rapid seeking)
+      if ('fastSeek' in video && typeof (video as any).fastSeek === 'function') {
+        try {
+          (video as any).fastSeek(targetTime);
+        } catch {
+          video.currentTime = targetTime;
+        }
+      } else {
+        video.currentTime = targetTime;
+      }
+
+      // Safety timeout: Reset seek lock if mobile browser suppresses 'seeked' event
+      if (seekTimeoutRef.current) clearTimeout(seekTimeoutRef.current);
+      seekTimeoutRef.current = window.setTimeout(() => {
+        isSeekingRef.current = false;
+      }, 120);
     }
-  }, [currentTime, videoLoaded, isPlaying]);
+  }, [currentTime, isPlaying]);
 
   const handleSeeked = () => {
     isSeekingRef.current = false;
+    if (seekTimeoutRef.current) {
+      clearTimeout(seekTimeoutRef.current);
+      seekTimeoutRef.current = null;
+    }
   };
 
   return (
-    <div className="fixed inset-0 w-full h-full pointer-events-none z-0 overflow-hidden bg-[#030712]">
+    <div className="fixed inset-0 w-screen h-screen min-h-[100dvh] pointer-events-none z-0 overflow-hidden bg-[#030712]">
+      {/* Dynamic Background Fallback Layer (Guarantees instant visual on mobile even if video is buffering) */}
+      <div
+        className="absolute inset-0 bg-cover bg-center transition-opacity duration-1000 pointer-events-none"
+        style={{
+          backgroundImage: `url(/assets/backgrounds/page_${activeStage}.png)`,
+          opacity: videoReady ? 0.2 : 1
+        }}
+      />
+
       {/* Silky-Smooth 24fps 1080p Film Backdrop with Zero Grain / Zero Dither */}
       <video
         ref={videoRef}
         src="/media/cinematic_journey_smooth.mp4"
-        className={`w-full h-full object-cover object-center select-none will-change-transform opacity-95 transition-all duration-700 hardware-accel ${
-          isMorphing ? 'scale-[1.015] brightness-105' : 'scale-100'
-        }`}
+        poster={`/assets/backgrounds/page_${activeStage}.png`}
+        className={`w-full h-full min-h-[100dvh] object-cover object-center select-none will-change-transform transition-all duration-700 hardware-accel ${
+          videoReady ? 'opacity-95' : 'opacity-0'
+        } ${isMorphing ? 'scale-[1.015] brightness-105' : 'scale-100'}`}
         playsInline
         muted
+        loop
+        autoPlay
         preload="auto"
-        onLoadedMetadata={() => setVideoLoaded(true)}
+        onLoadedMetadata={() => setVideoReady(true)}
+        onLoadedData={() => setVideoReady(true)}
+        onCanPlay={() => setVideoReady(true)}
         onSeeked={handleSeeked}
       />
 
