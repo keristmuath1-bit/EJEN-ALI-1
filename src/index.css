@@ -21,6 +21,7 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+    overscroll-behavior-y: none;
   }
 
   #root {
@@ -47,21 +48,24 @@
 
 /* ============================================================
    CINEMATIC FLOATING HUD & GLASSMORPHISM (Zero Grain / No Sand)
-   Optimized for Low-End Mobile, Tablet, Portrait & Landscape
+   Optimized for 60FPS Low-End Mobile, Tablet, Portrait & Landscape
    ============================================================ */
 .cinematic-hud {
-  background: rgba(3, 7, 18, 0.72);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: rgba(3, 7, 18, 0.75);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.85), inset 0 0 15px rgba(255, 255, 255, 0.02);
   border-radius: 20px;
   transform: translate3d(0, 0, 0);
   backface-visibility: hidden;
+  will-change: transform;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 768px) {
   .cinematic-hud {
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     border-radius: 16px;
     padding: 1rem !important;
   }
@@ -83,18 +87,18 @@
 
 .cinematic-subcard {
   background: rgba(15, 23, 42, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 14px;
-  transition: all 0.25s cubic-bezier(0.2, 0, 0, 1);
+  transition: border-color 0.2s ease, background-color 0.2s ease;
   transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
 }
 
 .cinematic-subcard:hover {
   border-color: rgba(220, 38, 38, 0.6);
   background: rgba(15, 23, 42, 0.85);
-  transform: translateY(-2px);
 }
 
 .cinematic-red-badge {
@@ -137,15 +141,17 @@
   justify-content: center;
 }
 
-/* Hardware Accelerated Layer */
+/* Hardware Accelerated Layer (Prevents compositing thrashing) */
 .hardware-accel {
   transform: translate3d(0, 0, 0);
   will-change: transform;
   backface-visibility: hidden;
+  contain: paint;
 }
 
 /* Smooth Soft Vignette (Replaces Sandy Scanlines with Clean Lens Falloff) */
 .cinematic-lens-vignette {
   background: radial-gradient(circle at center, transparent 40%, rgba(3, 7, 18, 0.8) 100%);
   pointer-events: none;
+  contain: strict;
 }
